@@ -1,1807 +1,305 @@
 <!DOCTYPE html>
-<html lang="th">
-
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MedMonitor | Patient Care IoT & ECG Real-Time Dashboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
-    rel="stylesheet">
-
-  <!-- Paho MQTT WebSocket Client -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
-</head>
-
-<body>
-
-  <div style="padding: 20px; font-family: 'Plus Jakarta Sans', sans-serif;">
-    <h2>MedMonitor Dashboard</h2>
-    <p id="status">กำลังเชื่อมต่อ HiveMQ Cloud...</p>
-    <h3>ผู้ป่วย ID: <span>11223344</span></h3>
-    <p>ค่า ECG ล่าสุด: <strong id="ecg-value"
-        style="font-family: 'JetBrains Mono', monospace; font-size: 24px; color: #e74c3c;">รอข้อมูล...</strong></p>
-  </div>
-
-  <script>
-    // --- ตั้งค่าเชื่อมต่อ HiveMQ Cloud ---
-    const brokerHost = "e421f0d612a2494f8d8a56556689e6c3.s1.eu.hivemq.cloud";
-    const brokerPort = 8884; // พอร์ต WSS
-    const clientId = "MedMonitor_Web_" + parseInt(Math.random() * 100000);
-
-    // กำหนด Topic ตามรหัสผู้ป่วยของคุณ
-    const patientTopic = "hospital/patient/ECG/11223344";
-
-    // สร้าง Client Instance
-    client = new Paho.MQTT.Client(brokerHost, Number(brokerPort), clientId);
-
-    // กำหนด Callback ฟังก์ชัน
-    client.onConnectionLost = onConnectionLost;
-    client.onMessageArrived = onMessageArrived;
-
-    // เริ่มต้นเชื่อมต่อ
-    client.connect({
-      onSuccess: onConnect,
-      onFailure: onFailure,
-      useSSL: true,
-      userName: "YOUR_HIVEMQ_USERNAME",    // <-- ใส่ Username ของคุณ
-      password: "YOUR_HIVEMQ_PASSWORD"     // <-- ใส่ Password ของคุณ
-    });
-
-    function onConnect() {
-      console.log("เชื่อมต่อ HiveMQ Cloud สำเร็จผ่านพอร์ต 8884!");
-      document.getElementById("status").innerText = "สถานะ: เชื่อมต่อสำเร็จ (Connected)";
-
-      // Subscribe Topic ของผู้ป่วย 11223344
-      client.subscribe(patientTopic);
-      console.log("Subscribed to Topic: " + patientTopic);
-    }
-
-    function onFailure(message) {
-      console.log("เชื่อมต่อไม่สำเร็จ: " + message.errorMessage);
-      document.getElementById("status").innerText = "สถานะ: เชื่อมต่อไม่สำเร็จ (" + message.errorMessage + ")";
-    }
-
-    function onConnectionLost(responseObject) {
-      if (responseObject.errorCode !== 0) {
-        console.log("การเชื่อมต่อขาดหาย: " + responseObject.errorMessage);
-        document.getElementById("status").innerText = "สถานะ: การเชื่อมต่อขาดหาย";
-      }
-    }
-
-    function onMessageArrived(message) {
-      console.log("ได้รับข้อความจาก Topic [" + message.destinationName + "]: " + message.payloadString);
-
-      // นำค่าที่ส่งมาจากบอร์ด IoT มาแสดงผลบนหน้าจอ
-      if (message.destinationName === patientTopic) {
-        document.getElementById("ecg-value").innerText = message.payloadString;
-      }
-    }
-  </script>
+  <title>ECG Patient Monitor</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root {
-      --bg-base: #0c1017;
-      --bg-surface: #141b26;
-      --bg-card: rgba(23, 31, 45, 0.75);
-      --bg-card-hover: rgba(30, 41, 59, 0.85);
-      --border-color: rgba(255, 255, 255, 0.08);
-      --border-focus: rgba(0, 229, 153, 0.4);
-
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --text-dim: #64748b;
-
-      --accent-red: #ff3b5c;
-      --accent-red-glow: rgba(255, 59, 92, 0.25);
-      --accent-green: #00e599;
-      --accent-green-glow: rgba(0, 229, 153, 0.3);
-      --accent-blue: #00a3ff;
-      --accent-blue-glow: rgba(0, 163, 255, 0.25);
-      --accent-orange: #ff9f1c;
-      --accent-purple: #a855f7;
-
-      --sidebar-width: 250px;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      user-select: none;
-    }
-
+    * { box-sizing: border-box; }
     body {
-      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-      background-color: var(--bg-base);
-      color: var(--text-main);
-      min-height: 100vh;
-      display: flex;
-      overflow-x: hidden;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f7fb;
+      color: #172033;
     }
-
-    /* Sidebar Navigation */
-    aside {
-      width: var(--sidebar-width);
-      background: var(--bg-surface);
-      border-right: 1px solid var(--border-color);
-      display: flex;
-      flex-direction: column;
-      padding: 24px 16px;
-      z-index: 20;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding-bottom: 24px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .brand-icon {
-      width: 42px;
-      height: 42px;
-      background: linear-gradient(135deg, #ff3b5c, #ff758c);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-size: 22px;
-      box-shadow: 0 4px 16px var(--accent-red-glow);
-    }
-
-    .brand-info h2 {
-      font-size: 17px;
-      font-weight: 700;
-      letter-spacing: -0.3px;
-    }
-
-    .brand-info p {
-      font-size: 11px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
-    .nav-group {
-      margin-top: 24px;
-      flex: 1;
-    }
-
-    .nav-label {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-dim);
-      letter-spacing: 0.8px;
-      margin-bottom: 10px;
-      padding-left: 8px;
-    }
-
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      color: var(--text-muted);
-      font-size: 13.5px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      margin-bottom: 6px;
-    }
-
-    .nav-item:hover {
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text-main);
-    }
-
-    .nav-item.active {
-      background: linear-gradient(90deg, rgba(0, 163, 255, 0.15), rgba(0, 163, 255, 0.05));
-      color: var(--accent-blue);
-      border: 1px solid rgba(0, 163, 255, 0.3);
-      box-shadow: 0 2px 12px var(--accent-blue-glow);
-    }
-
-    .nav-item svg {
-      width: 18px;
-      height: 18px;
-      stroke-width: 2;
-    }
-
-    .device-badge {
-      background: rgba(0, 229, 153, 0.08);
-      border: 1px solid rgba(0, 229, 153, 0.2);
-      border-radius: 10px;
-      padding: 12px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      background: var(--accent-green);
-      border-radius: 50%;
-      box-shadow: 0 0 10px var(--accent-green);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1;
-        transform: scale(1);
-      }
-
-      50% {
-        opacity: 0.4;
-        transform: scale(0.85);
-      }
-    }
-
-    /* Main Content */
-    main {
-      flex: 1;
-      padding: 24px 32px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-      overflow-y: auto;
-      max-width: 1600px;
-      margin: 0 auto;
-      width: 100%;
-    }
-
-    /* Top Bar */
     header {
+      background: #fff;
+      padding: 22px 5%;
+      border-bottom: 1px solid #e5e9f0;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding-bottom: 8px;
-    }
-
-    .header-title h1 {
-      font-size: 24px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-    }
-
-    .header-title p {
-      font-size: 13px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
-
-    .header-controls {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .btn-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 12.5px;
-      font-weight: 600;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      color: var(--text-main);
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .btn-pill:hover {
-      background: var(--bg-card-hover);
-      border-color: rgba(255, 255, 255, 0.2);
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #0070f3, #00a3ff);
-      border: none;
-      color: white;
-      box-shadow: 0 4px 14px var(--accent-blue-glow);
-    }
-
-    .btn-primary:hover {
-      opacity: 0.9;
-      transform: translateY(-1px);
-    }
-
-    .btn-icon {
-      width: 38px;
-      height: 38px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      color: var(--text-main);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-icon:hover {
-      background: var(--bg-card-hover);
-      color: var(--accent-blue);
-    }
-
-    .btn-icon.active {
-      background: rgba(0, 229, 153, 0.15);
-      color: var(--accent-green);
-      border-color: var(--accent-green);
-    }
-
-    /* Subheader Tabs */
-    .view-selector {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--bg-surface);
-      padding: 5px;
-      border-radius: 12px;
-      border: 1px solid var(--border-color);
-      width: fit-content;
-    }
-
-    .view-btn {
-      padding: 6px 14px;
-      border-radius: 8px;
-      font-size: 12.5px;
-      font-weight: 600;
-      color: var(--text-muted);
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.2s;
-    }
-
-    .view-btn.active {
-      background: var(--bg-card);
-      color: var(--text-main);
-      border: 1px solid var(--border-color);
-    }
-
-    /* Views Layout */
-    .view-panel {
-      display: none;
-      flex-direction: column;
       gap: 20px;
-      animation: fadeIn 0.25s ease;
     }
-
-    .view-panel.active {
-      display: flex;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(4px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    /* Vitals Grid (Page 1) */
-    .vitals-grid-p1 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
-
-    @media (max-width: 900px) {
-      .vitals-grid-p1 {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .vital-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--border-color);
-      border-radius: 18px;
-      padding: 20px 24px;
-      position: relative;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      transition: all 0.25s ease;
-    }
-
-    .vital-card:hover {
-      transform: translateY(-2px);
-      background: var(--bg-card-hover);
-      border-color: rgba(255, 255, 255, 0.15);
-    }
-
-    .vital-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-
-    .vital-title {
+    h1 { margin: 0; font-size: 25px; }
+    .sub { color: #697386; margin-top: 5px; font-size: 14px; }
+    .connection {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
-
-    .vital-badge {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 3px 8px;
-      border-radius: 12px;
-      text-transform: uppercase;
-    }
-
-    .badge-normal {
-      background: rgba(0, 229, 153, 0.15);
-      color: var(--accent-green);
-      border: 1px solid rgba(0, 229, 153, 0.3);
-    }
-
-    .badge-warning {
-      background: rgba(255, 159, 28, 0.15);
-      color: var(--accent-orange);
-      border: 1px solid rgba(255, 159, 28, 0.3);
-    }
-
-    .badge-danger {
-      background: rgba(255, 59, 92, 0.15);
-      color: var(--accent-red);
-      border: 1px solid rgba(255, 59, 92, 0.3);
-    }
-
-    .vital-body {
-      display: flex;
-      align-items: baseline;
-      gap: 10px;
-      margin: 6px 0;
-    }
-
-    .vital-value {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 46px;
-      font-weight: 700;
-      letter-spacing: -1px;
-      color: var(--text-main);
-    }
-
-    .vital-unit {
+      gap: 9px;
+      font-weight: bold;
       font-size: 14px;
-      font-weight: 600;
-      color: var(--text-muted);
     }
-
-    .vital-footer {
-      font-size: 11.5px;
-      color: var(--text-dim);
-      font-weight: 500;
-      margin-top: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    .dot {
+      width: 11px; height: 11px; border-radius: 50%;
+      background: #d64545;
     }
-
-    .vital-line {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-    }
-
-    .card-hr .icon-box {
-      background: var(--accent-red-glow);
-      color: var(--accent-red);
-    }
-
-    .card-hr .vital-line {
-      background: var(--accent-red);
-      box-shadow: 0 0 10px var(--accent-red);
-    }
-
-    .card-lead .icon-box {
-      background: var(--accent-green-glow);
-      color: var(--accent-green);
-    }
-
-    .card-lead .vital-line {
-      background: var(--accent-green);
-      box-shadow: 0 0 10px var(--accent-green);
-    }
-
-    .icon-box {
-      width: 34px;
-      height: 34px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-    }
-
-    .heart-beat {
-      display: inline-block;
-      animation: heartbeat 1.2s infinite;
-    }
-
-    @keyframes heartbeat {
-
-      0%,
-      100% {
-        transform: scale(1);
-      }
-
-      14% {
-        transform: scale(1.22);
-      }
-
-      28% {
-        transform: scale(1);
-      }
-
-      42% {
-        transform: scale(1.15);
-      }
-
-      70% {
-        transform: scale(1);
-      }
-    }
-
-    /* ECG Waveform Screen */
-    .ecg-card {
-      background: #080c12;
-      border: 1px solid rgba(0, 229, 153, 0.2);
-      border-radius: 20px;
-      padding: 18px 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(0, 0, 0, 0.6);
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      position: relative;
-    }
-
-    .ecg-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      padding-bottom: 12px;
-    }
-
-    .ecg-title {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .ecg-badge-lead {
-      background: linear-gradient(135deg, #00e599, #00b377);
-      color: #0c1017;
-      font-weight: 800;
-      font-size: 11px;
-      padding: 4px 10px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .ecg-meta {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    .ecg-controls {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .btn-tool {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: var(--text-main);
-      padding: 6px 12px;
-      border-radius: 8px;
-      font-size: 11.5px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.2s;
-    }
-
-    .btn-tool:hover {
-      background: rgba(255, 255, 255, 0.12);
-      border-color: rgba(255, 255, 255, 0.25);
-    }
-
-    .btn-tool.active {
-      background: var(--accent-green);
-      color: #0c1017;
-      border-color: var(--accent-green);
-    }
-
-    .canvas-container {
-      position: relative;
-      width: 100%;
-      height: 340px;
-      background: #05080c;
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      cursor: crosshair;
-    }
-
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-
-    /* Caliper Banner */
-    .caliper-banner {
-      position: absolute;
-      top: 12px;
-      right: 14px;
-      background: rgba(12, 16, 23, 0.92);
-      backdrop-filter: blur(8px);
-      border: 1px solid var(--accent-blue);
-      border-radius: 10px;
-      padding: 8px 14px;
-      display: none;
-      align-items: center;
-      gap: 14px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-      z-index: 10;
-    }
-
-    .caliper-banner.show {
-      display: flex;
-    }
-
-    .caliper-metric span {
-      color: var(--accent-blue);
-      font-weight: 700;
-      font-size: 13px;
-    }
-
-    /* Page 4: HRV Analytics Styles */
-    .hrv-grid {
+    .dot.online { background: #25a35a; }
+    main { width: 90%; max-width: 1400px; margin: 25px auto; }
+    .cards {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      margin-bottom: 18px;
     }
-
-    .hrv-analytics-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 20px;
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .poincare-container {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
-
-    @media (max-width: 1000px) {
-      .poincare-container {
-        grid-template-columns: 1fr;
-      }
-
-      .hrv-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    /* Table Styles for Page 2 (Data Logging) */
-    .table-container {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 18px;
-      overflow: hidden;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-      text-align: left;
-    }
-
-    th {
-      background: rgba(255, 255, 255, 0.03);
-      padding: 14px 18px;
-      font-weight: 700;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--border-color);
-      text-transform: uppercase;
-      font-size: 11px;
-      letter-spacing: 0.5px;
-    }
-
-    td {
-      padding: 12px 18px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    tr:hover {
-      background: rgba(255, 255, 255, 0.02);
-    }
-
-    /* Alerts Panel for Page 3 */
-    .alert-card {
-      background: rgba(255, 59, 92, 0.08);
-      border: 1px solid rgba(255, 59, 92, 0.25);
+    .card, .chart-card {
+      background: #fff;
+      border: 1px solid #e5e9f0;
       border-radius: 14px;
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
+      padding: 20px;
+      box-shadow: 0 3px 14px rgba(30,45,70,.05);
     }
-
-    .alert-info h4 {
-      font-size: 14px;
+    .label { color: #697386; font-size: 14px; }
+    .value {
+      font-size: 35px;
       font-weight: 700;
-      color: var(--accent-red);
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      margin-top: 9px;
     }
-
-    .alert-info p {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 4px;
+    .unit { font-size: 16px; font-weight: normal; color: #697386; }
+    .grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 18px;
+    }
+    .chart-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 15px;
+    }
+    .chart-wrap { height: 410px; }
+    .status-box {
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 10px;
+      background: #f5f7fa;
+    }
+    .status-good { color: #21874a; font-weight: bold; }
+    .status-bad { color: #c43c3c; font-weight: bold; }
+    .info {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .info div {
+      background: #f7f8fa;
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .info strong { display: block; margin-top: 5px; font-size: 18px; }
+    .log {
+      margin-top: 18px;
+      color: #697386;
+      font-size: 13px;
+    }
+    @media (max-width: 900px) {
+      .cards { grid-template-columns: 1fr 1fr; }
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .cards { grid-template-columns: 1fr; }
+      header { align-items: flex-start; flex-direction: column; }
     }
   </style>
-  </head>
+</head>
+<body>
+<header>
+  <div>
+    <h1>❤️ ECG Patient Monitor</h1>
+    <div class="sub">ESP32 + AD8232 · Real-time MQTT Dashboard</div>
+  </div>
+  <div class="connection">
+    <span id="connectionDot" class="dot"></span>
+    <span id="connectionText">Disconnected</span>
+  </div>
+</header>
 
-  <body>
+<main>
+  <section class="cards">
+    <div class="card">
+      <div class="label">Heart Rate</div>
+      <div class="value"><span id="bpm">--</span> <span class="unit">BPM</span></div>
+    </div>
+    <div class="card">
+      <div class="label">RR Interval</div>
+      <div class="value"><span id="rr">--</span> <span class="unit">ms</span></div>
+    </div>
+    <div class="card">
+      <div class="label">SDNN</div>
+      <div class="value"><span id="sdnn">--</span> <span class="unit">ms</span></div>
+    </div>
+    <div class="card">
+      <div class="label">RMSSD</div>
+      <div class="value"><span id="rmssd">--</span> <span class="unit">ms</span></div>
+    </div>
+  </section>
 
-    <!-- Sidebar Navigation with 4 Dedicated Clinical Menus -->
-    <aside>
-      <div class="brand">
-        <div class="brand-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-          </svg>
-        </div>
-        <div class="brand-info">
-          <h2>MedMonitor</h2>
-          <p>Patient Care IoT</p>
-        </div>
+  <section class="grid">
+    <div class="chart-card">
+      <div class="chart-title">📈 Live ECG Waveform</div>
+      <div class="chart-wrap">
+        <canvas id="ecgChart"></canvas>
       </div>
+    </div>
 
-      <div class="nav-group">
-        <div class="nav-label">CLINICAL MENUS</div>
-
-        <!-- Menu 1: Vitals & ECG Waveform -->
-        <div class="nav-item active" id="nav-vitals" onclick="switchView('vitals')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-          </svg>
-          <span>1. Vitals Monitor</span>
-        </div>
-
-        <!-- Menu 2: Data Logging -->
-        <div class="nav-item" id="nav-logging" onclick="switchView('logging')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-          </svg>
-          <span>2. Data Logging</span>
-        </div>
-
-        <!-- Menu 3: Clinical Alerts -->
-        <div class="nav-item" id="nav-alerts" onclick="switchView('alerts')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          <span>3. Clinical Alerts</span>
-        </div>
-
-        <!-- Menu 4: HRV Analytics (RMSSD, SDNN, Latest RR) -->
-        <div class="nav-item" id="nav-hrv" onclick="switchView('hrv')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M8 12h8" />
-            <path d="M12 8v8" />
-          </svg>
-          <span>4. HRV Analytics (วิจัย)</span>
-        </div>
+    <div class="chart-card">
+      <div class="chart-title">System Status</div>
+      <div class="info">
+        <div>Lead Status<strong id="leadStatus">--</strong></div>
+        <div>MQTT<strong id="mqttStatus">Disconnected</strong></div>
       </div>
-
-      <div class="device-badge">
-        <div class="status-dot"></div>
-        <div>
-          <div style="font-size: 11.5px; font-weight: 700;" id="conn-device-title">ESP32 + AD8232</div>
-          <div style="font-size: 10px; color: var(--text-muted);" id="conn-device-sub">Sampling Fs: 250 Hz</div>
-        </div>
+      <div class="status-box">
+        <div class="label">Latest ECG status</div>
+        <div id="ecgStatus" style="margin-top:7px;font-weight:bold;">Waiting for data...</div>
       </div>
-    </aside>
-
-    <!-- Main Content Area -->
-    <main>
-      <!-- Header -->
-      <header>
-        <div class="header-title">
-          <h1 id="page-header-title">Vitals Monitor</h1>
-          <p id="page-header-desc">Live vitals and high-resolution ECG waveform stream</p>
-        </div>
-
-        <div class="header-controls">
-          <!-- Audio Beep Button -->
-          <button class="btn-icon active" id="btn-audio" title="สลับเสียง Beep ชีพจร">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.08"></path>
-            </svg>
-          </button>
-
-          <!-- Connect Hardware Button (USB) -->
-          <button class="btn-pill" id="btn-connect-usb" style="background: var(--bg-card);">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-              <line x1="6" y1="6" x2="6.01" y2="6"></line>
-              <line x1="6" y1="18" x2="6.01" y2="18"></line>
-            </svg>
-            <span id="conn-btn-text">USB</span>
-          </button>
-
-          <!-- Connect Cloud WiFi Button (MQTT HiveMQ) -->
-          <button class="btn-pill btn-primary" id="btn-open-cloud-modal">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-            </svg>
-            <span id="cloud-btn-text">🌐 Connect Cloud (WiFi)</span>
-          </button>
-        </div>
-      </header>
-
-      <!-- Cloud Settings Modal -->
-      <div class="modal-backdrop" id="modal-cloud">
-        <div class="modal-box">
-          <div class="modal-header">
-            <h3>🌐 HiveMQ Cloud (WiFi) Settings</h3>
-            <button class="btn-icon" style="width:30px; height:30px;" onclick="toggleCloudModal(false)">✕</button>
-          </div>
-          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
-            รับข้อมูลคลื่นสดจาก ESP32 ผ่าน WiFi ไร้สาย ไม่ต้องต่อสาย USB เข้าคอม
-          </p>
-
-          <div class="form-group">
-            <label>HiveMQ Cluster URL (Host)</label>
-            <input type="text" id="mqtt-host" class="form-input" placeholder="เช่น xxxxx.s1.eu.hivemq.cloud">
-          </div>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <div class="form-group">
-              <label>WebSocket Port</label>
-              <input type="number" id="mqtt-port" class="form-input" value="8884">
-            </div>
-            <div class="form-group">
-              <label>MQTT Topic</label>
-              <input type="text" id="mqtt-topic" class="form-input" value="medmonitor/#">
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Username</label>
-            <input type="text" id="mqtt-user" class="form-input" placeholder="Device Username">
-          </div>
-
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" id="mqtt-pass" class="form-input" placeholder="Device Password">
-          </div>
-
-          <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button class="btn-pill btn-primary" style="flex:1; justify-content:center; padding: 12px;"
-              onclick="connectMqttCloud()">
-              🚀 Connect Cloud Stream
-            </button>
-            <button class="btn-pill" style="padding: 12px;" onclick="disconnectMqttCloud()">
-              Disconnect
-            </button>
-          </div>
-        </div>
+      <div class="log">
+        MQTT Broker:<br>
+        e42f10d612a2494f8d8a565566689e6c3.s1.eu.hivemq.cloud:8884
       </div>
-
-      <!-- ===================================================================== -->
-      <!-- VIEW 1: VITALS MONITOR & ECG WAVEFORM (ตรงตามรูปตัวอย่าง) -->
-      <!-- ===================================================================== -->
-      <section id="view-vitals" class="view-panel active">
-        <!-- Vitals Top Cards -->
-        <div class="vitals-grid-p1">
-          <!-- Heart Rate Card -->
-          <div class="vital-card card-hr">
-            <div class="vital-header">
-              <div class="vital-title" style="color: var(--accent-red);">
-                <div class="icon-box heart-beat">❤️</div>
-                <span>HEART RATE</span>
-              </div>
-              <span class="vital-badge badge-normal" id="hr-status-badge">NORMAL</span>
-            </div>
-            <div class="vital-body">
-              <span class="vital-value" id="val-bpm">88</span>
-              <span class="vital-unit">BPM</span>
-            </div>
-            <div class="vital-footer">
-              <span>Normal range: 60 - 100 BPM</span>
-              <span id="bpm-spark">📈 Stable</span>
-            </div>
-            <div class="vital-line"></div>
-          </div>
-
-          <!-- Hardware & Lead Connection Card -->
-          <div class="vital-card card-lead">
-            <div class="vital-header">
-              <div class="vital-title" style="color: var(--accent-green);">
-                <div class="icon-box">🩺</div>
-                <span>LEAD I & SIGNAL QUALITY</span>
-              </div>
-              <span class="vital-badge badge-normal" id="lead-status-badge-p1">CONNECTED</span>
-            </div>
-            <div class="vital-body">
-              <span class="vital-value" style="font-size: 40px; color: var(--accent-green);">OPTIMAL</span>
-            </div>
-            <div class="vital-footer">
-              <span>Sampling: 250 Hz (4ms)</span>
-              <span>Noise Filter: HP 0.8Hz + LP 20Hz</span>
-            </div>
-            <div class="vital-line"></div>
-          </div>
-        </div>
-
-        <!-- Real-Time ECG Waveform Card -->
-        <div class="ecg-card">
-          <div class="ecg-header">
-            <div class="ecg-title">
-              <div class="ecg-badge-lead">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                </svg>
-                LEAD I
-              </div>
-              <span style="font-weight: 700; font-size: 15px;">Electrocardiogram</span>
-              <span class="vital-badge badge-normal" id="stream-mode-badge">SIMULATOR ACTIVE</span>
-            </div>
-
-            <div class="ecg-meta">
-              <span>1 MV/DIV</span>
-              <span>•</span>
-              <span>25 MM/S</span>
-              <span>•</span>
-              <span id="canvas-fps">60 FPS</span>
-            </div>
-
-            <div class="ecg-controls">
-              <button class="btn-tool" id="btn-freeze" title="หยุดภาพคลื่นเพื่อตรวจวัดด้วยตาเปล่า">
-                ⏸️ Freeze
-              </button>
-              <button class="btn-tool" id="btn-caliper-tool" title="เปิด/ปิด ไม้บรรทัดวัดระยะ R-Peak">
-                📐 Caliper
-              </button>
-              <button class="btn-tool" id="btn-save-strip" title="บันทึกภาพแถบคลื่น ECG">
-                📸 Snapshot
-              </button>
-            </div>
-          </div>
-
-          <div class="canvas-container" id="canvas-wrap">
-            <canvas id="ecgCanvas"></canvas>
-
-            <!-- Caliper Overlay Result Banner -->
-            <div class="caliper-banner" id="caliper-banner">
-              <div>📐 <strong>Caliper Measurement:</strong></div>
-              <div class="caliper-metric">Δt: <span id="caliper-dt">-- ms</span></div>
-              <div class="caliper-metric">Calculated HR: <span id="caliper-hr">-- BPM</span></div>
-              <button class="btn-tool" style="padding: 2px 8px; font-size: 10px;"
-                onclick="resetCaliper()">Clear</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ===================================================================== -->
-      <!-- VIEW 2: DATA LOGGING & EXPORT -->
-      <!-- ===================================================================== -->
-      <section id="view-logging" class="view-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <h3 style="font-size: 18px; font-weight: 700;">Recorded Heart Rate & RR Stream</h3>
-            <p style="font-size: 12.5px; color: var(--text-muted); margin-top: 4px;">
-              ประวัติการบันทึกจังหวะการเต้นของหัวใจแบบ Real-time พร้อม Export สำหรับงานวิจัย</p>
-          </div>
-          <button class="btn-pill btn-primary" onclick="exportDataCSV()">
-            💾 Export Data to CSV (Excel)
-          </button>
-        </div>
-
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Heart Rate (BPM)</th>
-                <th>RR Interval (ms)</th>
-                <th>RMSSD (ms)</th>
-                <th>SDNN (ms)</th>
-                <th>Validation Status</th>
-              </tr>
-            </thead>
-            <tbody id="log-table-body">
-              <tr>
-                <td>2026-08-20 22:15:00</td>
-                <td>88</td>
-                <td>682</td>
-                <td>38.4</td>
-                <td>54.2</td>
-                <td><span class="vital-badge badge-normal">VALID</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- ===================================================================== -->
-      <!-- VIEW 3: CLINICAL ALERTS & THRESHOLDS -->
-      <!-- ===================================================================== -->
-      <section id="view-alerts" class="view-panel">
-        <div class="hrv-analytics-card">
-          <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 10px;">Clinical Alert System & Guardrails</h3>
-
-          <div class="alert-card">
-            <div class="alert-info">
-              <h4>⚠️ Tachycardia Alert (BPM > 100)</h4>
-              <p>ระบบแจ้งเตือนอัตโนมัติเมื่ออัตราการเต้นของหัวใจสูงเกินเกณฑ์ปกติขณะพัก</p>
-            </div>
-            <span class="vital-badge badge-warning">ACTIVE GUARD</span>
-          </div>
-
-          <div class="alert-card">
-            <div class="alert-info">
-              <h4>⚠️ Bradycardia Alert (BPM < 60)</h4>
-                  <p>ระบบแจ้งเตือนอัตโนมัติเมื่ออัตราการเต้นของหัวใจต่ำกว่าเกณฑ์ปกติ</p>
-            </div>
-            <span class="vital-badge badge-normal">ARMED</span>
-          </div>
-
-          <div class="alert-card" style="background: rgba(168, 85, 247, 0.08); border-color: rgba(168, 85, 247, 0.25);">
-            <div class="alert-info">
-              <h4 style="color: var(--accent-purple);">⚠️ Autonomic Stress Alert (RMSSD < 20 ms)</h4>
-                  <p>ระบบแจ้งเตือนภาวะความเครียดสะสม หรือความเหนื่อยล้าของระบบประสาทพาราซิมพาเทติก</p>
-            </div>
-            <span class="vital-badge badge-normal">ARMED</span>
-          </div>
-
-          <div class="alert-card" style="background: rgba(0, 229, 153, 0.08); border-color: rgba(0, 229, 153, 0.25);">
-            <div class="alert-info">
-              <h4 style="color: var(--accent-green);">🔌 Lead-Off Detection (AD8232 Hardware Pin 18/19)</h4>
-              <p>ตรวจจับขั้วหลุดจากผิวหนังแบบ Real-time ตัดสัญญาณรบกวนทันที</p>
-            </div>
-            <span class="vital-badge badge-normal">MONITORING</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- ===================================================================== -->
-      <!-- VIEW 4: HRV ANALYTICS (RMSSD, SDNN, LATEST RR & POINCARÉ PLOT) -->
-      <!-- ===================================================================== -->
-      <section id="view-hrv" class="view-panel">
-        <!-- 3 HRV Specific Cards -->
-        <div class="hrv-grid">
-          <!-- RMSSD Card -->
-          <div class="vital-card card-spo2">
-            <div class="vital-header">
-              <div class="vital-title" style="color: var(--accent-blue);">
-                <div class="icon-box">🧠</div>
-                <span>RMSSD (HRV)</span>
-              </div>
-              <span class="vital-badge badge-normal" id="rmssd-badge">HEALTHY</span>
-            </div>
-            <div class="vital-body">
-              <span class="vital-value" id="val-rmssd">38.4</span>
-              <span class="vital-unit">ms</span>
-            </div>
-            <div class="vital-footer">
-              <span>Parasympathetic / Vagal Tone</span>
-              <span>Target: 25 - 60 ms</span>
-            </div>
-            <div class="vital-line" style="background: var(--accent-blue);"></div>
-          </div>
-
-          <!-- SDNN Card -->
-          <div class="vital-card card-lead">
-            <div class="vital-header">
-              <div class="vital-title" style="color: var(--accent-green);">
-                <div class="icon-box">⚡</div>
-                <span>SDNN (HRV)</span>
-              </div>
-              <span class="vital-badge badge-normal" id="sdnn-badge">NORMAL</span>
-            </div>
-            <div class="vital-body">
-              <span class="vital-value" id="val-sdnn">54.2</span>
-              <span class="vital-unit">ms</span>
-            </div>
-            <div class="vital-footer">
-              <span>Total ANS Variability</span>
-              <span>Target: 30 - 80 ms</span>
-            </div>
-            <div class="vital-line" style="background: var(--accent-green);"></div>
-          </div>
-
-          <!-- Latest RR Card -->
-          <div class="vital-card">
-            <div class="vital-header">
-              <div class="vital-title" style="color: var(--accent-purple);">
-                <div class="icon-box" style="background: rgba(168, 85, 247, 0.2); color: var(--accent-purple);">⏱️</div>
-                <span>LATEST RR-INTERVAL</span>
-              </div>
-              <span class="vital-badge badge-normal">ACCURATE ±4ms</span>
-            </div>
-            <div class="vital-body">
-              <span class="vital-value" id="val-rr">682</span>
-              <span class="vital-unit">ms</span>
-            </div>
-            <div class="vital-footer">
-              <span>Instantaneous RR</span>
-              <span>Mean RR: <span id="val-mean-rr">680.5</span> ms</span>
-            </div>
-            <div class="vital-line" style="background: var(--accent-purple);"></div>
-          </div>
-        </div>
-
-        <!-- Poincaré Plot & Clinical Interpretation -->
-        <div class="poincare-container">
-          <!-- Poincaré Scatter Canvas Card -->
-          <div class="hrv-analytics-card">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div>
-                <h4 style="font-size: 15px; font-weight: 700;">Poincaré Plot ($RR_n$ vs $RR_{n+1}$)</h4>
-                <p style="font-size: 11.5px; color: var(--text-muted);">การกระจายตัวของจังหวะหัวใจแบบไม่เชิงเส้น
-                  (Non-linear HRV)</p>
-              </div>
-              <span class="vital-badge badge-normal">Ellipse Dispersion</span>
-            </div>
-            <div
-              style="width: 100%; height: 260px; background: #05080c; border-radius: 12px; border: 1px solid var(--border-color); overflow: hidden; position: relative;">
-              <canvas id="poincareCanvas" width="400" height="260"></canvas>
-            </div>
-          </div>
-
-          <!-- Clinical HRV Guide Card -->
-          <div class="hrv-analytics-card">
-            <h4 style="font-size: 15px; font-weight: 700;">เกณฑ์การแปลผล HRV ทางคลินิก (Clinical Guide)</h4>
-            <div style="font-size: 13px; line-height: 1.6; color: var(--text-muted);">
-              <p style="margin-bottom: 8px;"><strong>🟢 RMSSD > 35 ms & SDNN > 50 ms</strong>: ร่างกายผ่อนคลาย
-                ระบบประสาทพาราซิมพาเทติกทำงานได้ดี มีความยืดหยุ่นของหัวใจสูง</p>
-              <p style="margin-bottom: 8px;"><strong>🟡 RMSSD 20–35 ms & SDNN 30–50 ms</strong>: ระดับปกติปานกลาง
-                ร่างกายอยู่ในสภาวะสมดุล</p>
-              <p><strong>🔴 RMSSD < 20 ms หรือ SDNN < 30 ms</strong>: สัญญาณเตือนความเครียดสะสม หรือความล้าของหัวใจ
-                    (มักพบในผู้ป่วยโรคหัวใจหรือผู้ที่พักผ่อนไม่เพียงพอ)</p>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <script>
-      // =========================================================================
-      // 1. STATE & ROUTING
-      // =========================================================================
-      const state = {
-        currentView: 'vitals',
-        isUsbConnected: false,
-        isFrozen: false,
-        isAudioEnabled: true,
-        isCaliperMode: false,
-        caliperPoints: [],
-
-        // Vitals State
-        bpm: 88,
-        spo2: 98,
-        rmssd: 38.4,
-        sdnn: 54.2,
-        rrInterval: 682,
-        meanRr: 680.5,
-        leadOff: false,
-
-        // Signal Stream
-        sampleRate: 250,
-        pointsBuffer: [],
-        maxBufferLength: 1500,
-        rrHistory: [] // For Poincaré plot [RR_n, RR_n+1]
-      };
-
-      const recordedDataLog = [];
-
-      // Switch Views in Sidebar
-      function switchView(viewName) {
-        state.currentView = viewName;
-
-        // Update nav active classes
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-        const activeNav = document.getElementById(`nav-${viewName}`);
-        if (activeNav) activeNav.classList.add('active');
-
-        // Update view panels
-        document.querySelectorAll('.view-panel').forEach(el => el.classList.remove('active'));
-        const activePanel = document.getElementById(`view-${viewName}`);
-        if (activePanel) activePanel.classList.add('active');
-
-        // Update titles
-        const titleMap = {
-          'vitals': { title: 'Vitals Monitor', desc: 'Live vitals and high-resolution ECG waveform stream' },
-          'logging': { title: 'Data Logging & Export', desc: 'Real-time beat-by-beat database with CSV export' },
-          'alerts': { title: 'Clinical Alerts', desc: 'Active safety guardrails and medical threshold alarms' },
-          'hrv': { title: 'HRV Analytics & Research', desc: 'Autonomic nervous system (ANS) variability, SDNN, RMSSD & Poincaré Plot' }
-        };
-
-        if (titleMap[viewName]) {
-          document.getElementById('page-header-title').textContent = titleMap[viewName].title;
-          document.getElementById('page-header-desc').textContent = titleMap[viewName].desc;
-        }
-
-        if (viewName === 'vitals') {
-          setTimeout(resizeCanvas, 50);
-        } else if (viewName === 'hrv') {
-          setTimeout(renderPoincarePlot, 50);
-        }
-      }
-
-      // =========================================================================
-      // 2. AUDIO SYNTHESIZER (HOSPITAL MONITOR BEEP)
-      // =========================================================================
-      let audioCtx = null;
-      function playHeartbeatBeep(freq = 880) {
-        if (!state.isAudioEnabled) return;
-        try {
-          if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          if (audioCtx.state === 'suspended') audioCtx.resume();
-
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-
-          gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
-
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-
-          osc.start();
-          osc.stop(audioCtx.currentTime + 0.08);
-        } catch (e) {
-          console.warn('Audio Context Error:', e);
-        }
-      }
-
-      // =========================================================================
-      // 3. ECG CANVAS RENDERING
-      // =========================================================================
-      const canvas = document.getElementById('ecgCanvas');
-      const ctx = canvas.getContext('2d');
-      const canvasWrap = document.getElementById('canvas-wrap');
-
-      function resizeCanvas() {
-        if (!canvasWrap) return;
-        const dpr = window.devicePixelRatio || 1;
-        const rect = canvasWrap.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        ctx.scale(dpr, dpr);
-      }
-      window.addEventListener('resize', resizeCanvas);
-      resizeCanvas();
-
-      function drawMedicalGrid(w, h) {
-        ctx.fillStyle = '#060a0f';
-        ctx.fillRect(0, 0, w, h);
-
-        const smallBox = 16;
-        const bigBox = smallBox * 5;
-
-        ctx.strokeStyle = 'rgba(0, 229, 153, 0.04)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let x = 0; x < w; x += smallBox) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-        for (let y = 0; y < h; y += smallBox) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
-        ctx.stroke();
-
-        ctx.strokeStyle = 'rgba(0, 229, 153, 0.12)';
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        for (let x = 0; x < w; x += bigBox) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-        for (let y = 0; y < h; y += bigBox) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
-        ctx.stroke();
-      }
-
-      function renderECG() {
-        if (state.currentView === 'vitals') {
-          const rect = canvasWrap.getBoundingClientRect();
-          const w = rect.width;
-          const h = rect.height;
-          const centerY = h / 2;
-          const gain = 0.55;
-
-          drawMedicalGrid(w, h);
-
-          if (state.pointsBuffer.length > 1) {
-            const stepX = w / (state.maxBufferLength - 1);
-
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#00e599';
-            ctx.strokeStyle = '#00e599';
-            ctx.lineWidth = 2.2;
-            ctx.lineJoin = 'round';
-            ctx.beginPath();
-
-            for (let i = 0; i < state.pointsBuffer.length; i++) {
-              const pt = state.pointsBuffer[i];
-              const x = i * stepX;
-              const y = centerY - (pt.val * gain);
-
-              if (i === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-
-            // R-Peak Markers
-            for (let i = 0; i < state.pointsBuffer.length; i++) {
-              const pt = state.pointsBuffer[i];
-              if (pt.isPeak) {
-                const x = i * stepX;
-                const y = centerY - (pt.val * gain) - 14;
-
-                ctx.fillStyle = '#ff3b5c';
-                ctx.beginPath();
-                ctx.arc(x, y, 4, 0, Math.PI * 2);
-                ctx.fill();
-
-                ctx.fillStyle = '#ff3b5c';
-                ctx.font = '10px JetBrains Mono';
-                ctx.fillText('R', x - 3, y - 6);
-              }
-            }
-          }
-
-          // Caliper overlay
-          if (state.caliperPoints.length > 0) {
-            ctx.strokeStyle = '#00a3ff';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-
-            state.caliperPoints.forEach((px, idx) => {
-              ctx.beginPath();
-              ctx.moveTo(px, 0); ctx.lineTo(px, h);
-              ctx.stroke();
-
-              ctx.fillStyle = '#00a3ff';
-              ctx.font = '11px JetBrains Mono';
-              ctx.fillText(`C${idx + 1}`, px + 4, 20);
-            });
-
-            if (state.caliperPoints.length === 2) {
-              const x1 = Math.min(state.caliperPoints[0], state.caliperPoints[1]);
-              const x2 = Math.max(state.caliperPoints[0], state.caliperPoints[1]);
-
-              ctx.beginPath();
-              ctx.moveTo(x1, h / 2); ctx.lineTo(x2, h / 2);
-              ctx.stroke();
-
-              ctx.fillStyle = 'rgba(0, 163, 255, 0.1)';
-              ctx.fillRect(x1, 0, x2 - x1, h);
-            }
-            ctx.setLineDash([]);
-          }
-        }
-
-        requestAnimationFrame(renderECG);
-      }
-      requestAnimationFrame(renderECG);
-
-      // =========================================================================
-      // 4. POINCARÉ PLOT RENDERER (VIEW 4)
-      // =========================================================================
-      const pCanvas = document.getElementById('poincareCanvas');
-      const pCtx = pCanvas.getContext('2d');
-
-      function renderPoincarePlot() {
-        if (!pCanvas) return;
-        const w = pCanvas.width;
-        const h = pCanvas.height;
-
-        pCtx.fillStyle = '#05080c';
-        pCtx.fillRect(0, 0, w, h);
-
-        // Draw Axis Lines
-        pCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        pCtx.lineWidth = 1;
-        pCtx.beginPath();
-        pCtx.moveTo(40, 20); pCtx.lineTo(40, h - 30);
-        pCtx.lineTo(w - 20, h - 30);
-        // Diagonal Identity line (RR_n = RR_n+1)
-        pCtx.moveTo(40, h - 30); pCtx.lineTo(w - 20, 20);
-        pCtx.stroke();
-
-        pCtx.fillStyle = '#94a3b8';
-        pCtx.font = '10px JetBrains Mono';
-        pCtx.fillText('RR_n (ms)', w - 70, h - 12);
-        pCtx.fillText('RR_n+1 (ms)', 8, 20);
-
-        // Plot Points (min RR: 400ms, max RR: 1000ms)
-        const minRR = 500;
-        const maxRR = 900;
-
-        if (state.rrHistory.length > 1) {
-          pCtx.fillStyle = '#00a3ff';
-          pCtx.shadowBlur = 6;
-          pCtx.shadowColor = '#00a3ff';
-
-          for (let i = 0; i < state.rrHistory.length - 1; i++) {
-            const rrn = state.rrHistory[i];
-            const rrnp1 = state.rrHistory[i + 1];
-
-            const x = 40 + ((rrn - minRR) / (maxRR - minRR)) * (w - 70);
-            const y = (h - 30) - ((rrnp1 - minRR) / (maxRR - minRR)) * (h - 60);
-
-            pCtx.beginPath();
-            pCtx.arc(x, y, 3.5, 0, Math.PI * 2);
-            pCtx.fill();
-          }
-          pCtx.shadowBlur = 0;
-        }
-      }
-
-      // =========================================================================
-      // 5. CALIPER INTERACTIVE TOOL
-      // =========================================================================
-      const caliperBanner = document.getElementById('caliper-banner');
-      const caliperDt = document.getElementById('caliper-dt');
-      const caliperHr = document.getElementById('caliper-hr');
-
-      canvasWrap.addEventListener('click', (e) => {
-        if (!state.isFrozen && !state.isCaliperMode) return;
-
-        const rect = canvasWrap.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-
-        if (state.caliperPoints.length >= 2) {
-          state.caliperPoints = [];
-        }
-        state.caliperPoints.push(clickX);
-
-        if (state.caliperPoints.length === 2) {
-          const p1 = Math.min(state.caliperPoints[0], state.caliperPoints[1]);
-          const p2 = Math.max(state.caliperPoints[0], state.caliperPoints[1]);
-          const w = rect.width;
-
-          const totalDurationMs = (state.maxBufferLength / state.sampleRate) * 1000;
-          const dt = ((p2 - p1) / w) * totalDurationMs;
-          const calculatedHR = (dt > 0) ? Math.round(60000 / dt) : 0;
-
-          caliperDt.textContent = `${Math.round(dt)} ms`;
-          caliperHr.textContent = `${calculatedHR} BPM`;
-          caliperBanner.classList.add('show');
-        } else {
-          caliperBanner.classList.remove('show');
-        }
-      });
-
-      function resetCaliper() {
-        state.caliperPoints = [];
-        caliperBanner.classList.remove('show');
-      }
-
-      // =========================================================================
-      // 6. SYNTHETIC SIMULATOR & VITALS UPDATE
-      // =========================================================================
-      let simPhase = 0;
-      let simBeatCounter = 0;
-
-      function generateRealisticECGSample() {
-        simPhase += 0.045;
-        const period = Math.PI * 2;
-        const modPhase = simPhase % period;
-
-        let val = 0;
-        let isPeak = false;
-
-        // P-Wave
-        if (modPhase > 0.4 && modPhase < 0.8) {
-          val = 15 * Math.sin((modPhase - 0.4) * Math.PI / 0.4);
-        }
-        // Q-Wave
-        else if (modPhase >= 1.05 && modPhase < 1.15) {
-          val = -25 * Math.sin((modPhase - 1.05) * Math.PI / 0.1);
-        }
-        // R-Peak
-        else if (modPhase >= 1.15 && modPhase < 1.35) {
-          val = 190 * Math.sin((modPhase - 1.15) * Math.PI / 0.2);
-          if (modPhase >= 1.23 && modPhase <= 1.27) isPeak = true;
-        }
-        // S-Wave
-        else if (modPhase >= 1.35 && modPhase < 1.5) {
-          val = -45 * Math.sin((modPhase - 1.35) * Math.PI / 0.15);
-        }
-        // T-Wave
-        else if (modPhase >= 1.9 && modPhase < 2.6) {
-          val = 30 * Math.sin((modPhase - 1.9) * Math.PI / 0.7);
-        }
-
-        val += Math.sin(simPhase * 0.08) * 4.0 + (Math.random() - 0.5) * 1.5;
-        return { val, isPeak };
-      }
-
-      setInterval(() => {
-        if (state.isFrozen) return;
-
-        let sample;
-        if (!state.isUsbConnected) {
-          sample = generateRealisticECGSample();
-          if (sample.isPeak) {
-            simBeatCounter++;
-            if (simBeatCounter % 2 === 0) {
-              playHeartbeatBeep(880);
-              const simRR = Math.floor(680 + Math.sin(Date.now() * 0.001) * 35);
-              state.rrHistory.push(simRR);
-              if (state.rrHistory.length > 50) state.rrHistory.shift();
-
-              updateVitalsDisplay({
-                bpm: Math.floor(60000 / simRR),
-                rmssd: (38.4 + Math.cos(Date.now() * 0.002) * 3).toFixed(1),
-                sdnn: (54.2 + Math.sin(Date.now() * 0.002) * 4).toFixed(1),
-                rr: simRR,
-                meanRr: 680.5,
-                status: 'VALID'
-              });
-
-              if (state.currentView === 'hrv') renderPoincarePlot();
-            }
-          }
-        }
-
-        if (sample) {
-          state.pointsBuffer.push(sample);
-          if (state.pointsBuffer.length > state.maxBufferLength) {
-            state.pointsBuffer.shift();
-          }
-        }
-      }, 4);
-
-      // Update Vitals Text
-      function updateVitalsDisplay(data) {
-        if (data.bpm) {
-          document.getElementById('val-bpm').textContent = data.bpm;
-        }
-        if (data.rmssd) {
-          const el = document.getElementById('val-rmssd');
-          if (el) el.textContent = data.rmssd;
-        }
-        if (data.sdnn) {
-          const el = document.getElementById('val-sdnn');
-          if (el) el.textContent = data.sdnn;
-        }
-        if (data.rr) {
-          const el = document.getElementById('val-rr');
-          if (el) el.textContent = data.rr;
-        }
-        if (data.meanRr) {
-          const el = document.getElementById('val-mean-rr');
-          if (el) el.textContent = data.meanRr;
-        }
-
-        // Add to Log Table (View 2)
-        const nowStr = new Date().toLocaleTimeString();
-        const tableBody = document.getElementById('log-table-body');
-        if (tableBody) {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-          <td>${nowStr}</td>
-          <td>${data.bpm || state.bpm}</td>
-          <td>${data.rr || state.rrInterval}</td>
-          <td>${data.rmssd || state.rmssd}</td>
-          <td>${data.sdnn || state.sdnn}</td>
-          <td><span class="vital-badge badge-normal">${data.status || 'VALID'}</span></td>
-        `;
-          tableBody.insertBefore(tr, tableBody.firstChild);
-          if (tableBody.children.length > 50) tableBody.removeChild(tableBody.lastChild);
-        }
-
-        recordedDataLog.push({
-          time: new Date().toISOString(),
-          bpm: data.bpm || state.bpm,
-          rmssd: data.rmssd || state.rmssd,
-          sdnn: data.sdnn || state.sdnn,
-          rr: data.rr || state.rrInterval
-        });
-      }
-
-      // =========================================================================
-      // 7. WEB SERIAL API
-      // =========================================================================
-      const btnConnectUsb = document.getElementById('btn-connect-usb');
-      const connBtnText = document.getElementById('conn-btn-text');
-      const streamModeBadge = document.getElementById('stream-mode-badge');
-      let serialPort = null;
-      let serialReader = null;
-
-      btnConnectUsb.addEventListener('click', async () => {
-        if (!('serial' in navigator)) {
-          alert('กรุณาเปิดบน Google Chrome หรือ Microsoft Edge เพื่อใช้งาน Web Serial API เชื่อมต่อ ESP32 ครับ');
-          return;
-        }
-
-        try {
-          serialPort = await navigator.serial.requestPort();
-          await serialPort.open({ baudRate: 230400 });
-          state.isUsbConnected = true;
-
-          connBtnText.textContent = 'Connected (USB)';
-          btnConnectUsb.style.background = 'linear-gradient(135deg, #00b377, #00e599)';
-          streamModeBadge.textContent = 'LIVE HARDWARE (230400 BAUD)';
-          streamModeBadge.className = 'vital-badge badge-normal';
-
-          state.pointsBuffer = [];
-          readSerialStream();
-        } catch (err) {
-          console.error('Serial Connection Error:', err);
-        }
-      });
-
-      async function readSerialStream() {
-        const textDecoder = new TextDecoderStream();
-        serialPort.readable.pipeTo(textDecoder.writable);
-        serialReader = textDecoder.readable.getReader();
-
-        let lineBuffer = '';
-
-        try {
-          while (true) {
-            const { value, done } = await serialReader.read();
-            if (done) break;
-            lineBuffer += value;
-
-            let lines = lineBuffer.split('\n');
-            lineBuffer = lines.pop();
-
-            for (let line of lines) {
-              line = line.trim();
-              if (!line || line.startsWith('#') || line.startsWith('[')) continue;
-
-              const parts = line.split(',');
-              // MODE_RPEAK: timestamp_ms, rawADC, filteredECG, peakMarker, rr_ms, hr_bpm, status
-              if (parts.length >= 4) {
-                const filteredVal = parseFloat(parts[2]);
-                const peakMarker = parseInt(parts[3]);
-                const rrMs = parts[4] ? parseInt(parts[4]) : 0;
-                const hrBpm = parts[5] ? parseInt(parts[5]) : 0;
-                const status = parts[6] || 'TRACKING';
-
-                const isPeak = (peakMarker > 0);
-                if (isPeak) {
-                  playHeartbeatBeep(920);
-                  if (rrMs > 0) {
-                    state.rrHistory.push(rrMs);
-                    if (state.rrHistory.length > 50) state.rrHistory.shift();
-                  }
-                  if (hrBpm > 0) {
-                    updateVitalsDisplay({
-                      bpm: hrBpm,
-                      rr: rrMs,
-                      status: status
-                    });
-                  }
-                  if (state.currentView === 'hrv') renderPoincarePlot();
-                }
-
-                state.pointsBuffer.push({ val: filteredVal, isPeak: isPeak });
-                if (state.pointsBuffer.length > state.maxBufferLength) {
-                  state.pointsBuffer.shift();
-                }
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Serial Read Loop Exited:', e);
-        }
-      }
-
-      // =========================================================================
-      // 8. TOOLBAR CONTROLS
-      // =========================================================================
-      const btnFreeze = document.getElementById('btn-freeze');
-      btnFreeze.addEventListener('click', () => {
-        state.isFrozen = !state.isFrozen;
-        btnFreeze.classList.toggle('active', state.isFrozen);
-        btnFreeze.innerHTML = state.isFrozen ? '▶️ Resume' : '⏸️ Freeze';
-      });
-
-      const btnCaliper = document.getElementById('btn-caliper-tool');
-      btnCaliper.addEventListener('click', () => {
-        state.isCaliperMode = !state.isCaliperMode;
-        btnCaliper.classList.toggle('active', state.isCaliperMode);
-        if (!state.isCaliperMode) resetCaliper();
-      });
-
-      const btnAudio = document.getElementById('btn-audio');
-      btnAudio.addEventListener('click', () => {
-        state.isAudioEnabled = !state.isAudioEnabled;
-        btnAudio.classList.toggle('active', state.isAudioEnabled);
-      });
-
-      document.getElementById('btn-save-strip').addEventListener('click', () => {
-        const link = document.createElement('a');
-        link.download = `ECG_Lead1_${new Date().toISOString().slice(0, 19)}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-      });
-
-      function exportDataCSV() {
-        if (recordedDataLog.length === 0) {
-          alert('ยังไม่มีประวัติข้อมูลที่บันทึกไว้ในเซสชันนี้ครับ');
-          return;
-        }
-        let csv = 'Timestamp,HeartRate_BPM,RMSSD_ms,SDNN_ms,RR_Interval_ms\n';
-        recordedDataLog.forEach(row => {
-          csv += `${row.time},${row.bpm},${row.rmssd},${row.sdnn},${row.rr}\n`;
-        });
-
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.setAttribute('href', url);
-        a.setAttribute('download', `medmonitor_clinical_log_${Date.now()}.csv`);
-        a.click();
-      }
-    </script>
-  </body>
-
+    </div>
+  </section>
+</main>
+
+<script>
+  // HiveMQ Cloud WebSocket TLS
+  const MQTT_HOST = "e42f10d612a2494f8d8a565566689e6c3.s1.eu.hivemq.cloud";
+  const MQTT_PORT = 8884;
+
+  // IMPORTANT:
+  // Do not put a real HiveMQ password in a public website.
+  // Enter the credentials below only for local/private testing.
+  const MQTT_USERNAME = "ECG";
+  const MQTT_PASSWORD = "11223344";
+
+  // Topics expected from ESP32
+  const TOPICS = {
+    bpm: "ecg/bpm",
+    rr: "ecg/rr",
+    sdnn: "ecg/sdnn",
+    rmssd: "ecg/rmssd",
+    waveform: "ecg/waveform",
+    status: "ecg/status"
+  };
+
+  const MAX_POINTS = 500;
+  const ecgData = [];
+  const labels = [];
+
+  const chart = new Chart(document.getElementById("ecgChart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "ECG",
+        data: ecgData,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.05
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales: {
+        x: { display: false },
+        y: { title: { display: true, text: "Signal" } }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  function setConnection(online) {
+    document.getElementById("connectionDot").classList.toggle("online", online);
+    document.getElementById("connectionText").textContent =
+      online ? "Connected" : "Disconnected";
+    document.getElementById("mqttStatus").textContent =
+      online ? "Connected" : "Disconnected";
+  }
+
+  function numberValue(topic, value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    if (topic === TOPICS.bpm) document.getElementById("bpm").textContent = Math.round(n);
+    if (topic === TOPICS.rr) document.getElementById("rr").textContent = Math.round(n);
+    if (topic === TOPICS.sdnn) document.getElementById("sdnn").textContent = n.toFixed(1);
+    if (topic === TOPICS.rmssd) document.getElementById("rmssd").textContent = n.toFixed(1);
+  }
+
+  function addECG(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+
+    ecgData.push(n);
+    labels.push("");
+    if (ecgData.length > MAX_POINTS) {
+      ecgData.shift();
+      labels.shift();
+    }
+    chart.update("none");
+  }
+
+  const clientId = "dashboard_" + Math.random().toString(16).slice(2);
+
+  const client = mqtt.connect(`wss://${MQTT_HOST}:${MQTT_PORT}/mqtt`, {
+    clientId,
+    username: MQTT_USERNAME,
+    password: MQTT_PASSWORD,
+    clean: true,
+    reconnectPeriod: 3000,
+    connectTimeout: 10000,
+    keepalive: 30
+  });
+
+  client.on("connect", () => {
+    setConnection(true);
+
+    Object.values(TOPICS).forEach(topic => {
+      client.subscribe(topic, { qos: 0 });
+    });
+
+    document.getElementById("ecgStatus").textContent = "Receiving data...";
+  });
+
+  client.on("reconnect", () => {
+    setConnection(false);
+    document.getElementById("connectionText").textContent = "Reconnecting...";
+  });
+
+  client.on("close", () => setConnection(false));
+
+  client.on("error", (err) => {
+    console.error("MQTT error:", err);
+    setConnection(false);
+    document.getElementById("ecgStatus").textContent =
+      "MQTT connection error";
+  });
+
+  client.on("message", (topic, message) => {
+    const value = message.toString();
+
+    if (topic === TOPICS.waveform) {
+      // Supports one number per MQTT message.
+      // Also supports comma-separated values.
+      value.split(",").forEach(v => addECG(v));
+      return;
+    }
+
+    if (topic === TOPICS.status) {
+      document.getElementById("ecgStatus").textContent = value;
+      const good = value === "VALID" || value === "TRACKING" ||
+                   value === "CONNECTED" || value === "OK";
+      document.getElementById("leadStatus").textContent =
+        value === "LEAD_OFF" ? "LEAD OFF" : "OK";
+      document.getElementById("leadStatus").className =
+        good ? "status-good" : "status-bad";
+      return;
+    }
+
+    numberValue(topic, value);
+  });
+</script>
+</body>
 </html>
